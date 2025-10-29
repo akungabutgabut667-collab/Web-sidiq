@@ -1,0 +1,359 @@
+<!doctype html>
+
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Snake — Game Offline</title>
+  <style>
+    /* Reset sederhana */
+    *{box-sizing:border-box;font-family:Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;}
+    html,body{height:100%;margin:0;background:linear-gradient(180deg,#0f172a 0%, #021029 100%);color:#e6eef8}
+    .wrapper{min-height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px}
+    .card{width:100%;max-width:920px;background:linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.02));border-radius:14px;padding:18px;box-shadow:0 6px 30px rgba(2,6,23,0.6);}
+    header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+    header h1{font-size:18px;margin:0}
+    .controls{display:flex;gap:8px;align-items:center}
+    button.btn{background:transparent;border:1px solid rgba(255,255,255,0.08);color:inherit;padding:8px 12px;border-radius:10px;cursor:pointer}
+    button.btn.primary{background:linear-gradient(90deg,#06b6d4,#3b82f6);border:0;color:#021029;font-weight:700}
+    .board-wrap{display:flex;gap:18px;align-items:flex-start}
+    #board{background:#02182b;border-radius:10px;padding:8px;display:block}
+    .sidebar{flex:1;min-width:220px}
+    .meta{margin-bottom:10px}
+    .meta p{margin:6px 0}
+    .hint{font-size:13px;color:#a9c0d6}/* Mobile controls */
+.mobile-controls{display:none;margin-top:12px;gap:10px;justify-content:center}
+.mobile-controls button{width:58px;height:58px;border-radius:12px;font-weight:700}
+
+/* Overlay for small screens */
+@media (max-width:720px){
+  .board-wrap{flex-direction:column;align-items:center}
+  .sidebar{width:100%}
+  .mobile-controls{display:flex}
+  .card{padding:14px}
+}
+
+/* Footer */
+footer{margin-top:12px;font-size:13px;color:#9fb4cd;text-align:center}
+
+  </style>
+</head>
+<body>
+  <div class="wrapper">
+    <div class="card">
+      <header>
+        <h1>Snake — Game Offline</h1>
+        <div class="controls">
+          <button id="btnStart" class="btn primary">Mulai</button>
+          <button id="btnPause" class="btn">Jeda</button>
+          <button id="btnReset" class="btn">Reset</button>
+        </div>
+      </header><div class="board-wrap">
+    <canvas id="board" width="600" height="600"></canvas>
+
+    <aside class="sidebar">
+      <div class="meta">
+        <p>Skor: <strong id="score">0</strong></p>
+        <p>High Score: <strong id="highscore">0</strong></p>
+        <p>Kecepatan: <strong id="speedLabel">Normal</strong></p>
+      </div>
+
+      <div class="settings">
+        <label class="hint">Pilih ukuran grid:</label>
+        <select id="gridSize">
+          <option value="15">15 x 15 (Mudah)</option>
+          <option value="20" selected>20 x 20 (Normal)</option>
+          <option value="25">25 x 25 (Sulit)</option>
+        </select>
+
+        <div style="margin-top:8px">
+          <label class="hint">Kecepatan:</label>
+          <input type="range" id="speed" min="3" max="12" value="6" />
+        </div>
+
+        <div style="margin-top:12px">
+          <p class="hint">Kontrol keyboard: ↑ ↓ ← → atau WASD</p>
+          <p class="hint">Kontrol sentuh: gunakan tombol di bawah atau swipe</p>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <div class="mobile-controls" id="mobileControls">
+    <button id="mUp" class="btn">↑</button>
+  </div>
+
+  <div style="display:flex;justify-content:center;gap:10px;margin-top:8px;">
+    <button id="mLeft" class="btn">←</button>
+    <button id="mDown" class="btn">↓</button>
+    <button id="mRight" class="btn">→</button>
+  </div>
+
+  <footer>
+    <div id="msg">Tekan "Mulai" untuk bermain — ini bisa dimainkan sepenuhnya offline.</div>
+  </footer>
+</div>
+
+  </div>  <script>
+    /*
+      Snake game sederhana, offline, satu file.
+      Fitur:
+       - Keyboard & touch controls
+       - Pilihan grid size dan speed
+       - High score disimpan di localStorage
+       - Suara sederhana via WebAudio
+    */
+
+    // Elemen DOM
+    const canvas = document.getElementById('board');
+    const ctx = canvas.getContext('2d');
+    const btnStart = document.getElementById('btnStart');
+    const btnPause = document.getElementById('btnPause');
+    const btnReset = document.getElementById('btnReset');
+    const scoreEl = document.getElementById('score');
+    const highEl = document.getElementById('highscore');
+    const gridSel = document.getElementById('gridSize');
+    const speedRange = document.getElementById('speed');
+    const speedLabel = document.getElementById('speedLabel');
+    const msg = document.getElementById('msg');
+
+    // Mobile buttons
+    const btnUp = document.getElementById('mUp');
+    const btnDown = document.getElementById('mDown');
+    const btnLeft = document.getElementById('mLeft');
+    const btnRight = document.getElementById('mRight');
+
+    // Game state
+    let gridCount = parseInt(gridSel.value);
+    let tileSize; // dihitung
+    let snake; // array posisi: {x,y}
+    let dir; // current direction {x,y}
+    let nextDir; // buffer direction
+    let food;
+    let score = 0;
+    let highScore = Number(localStorage.getItem('snake_high') || 0);
+    highEl.textContent = highScore;
+    let running = false;
+    let tickInterval = null;
+
+    // Audio: simple beep menggunakan WebAudio
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    function beep(freq, time=0.06){
+      const o = audioCtx.createOscillator();
+      const g = audioCtx.createGain();
+      o.type = 'sine';
+      o.frequency.value = freq;
+      g.gain.value = 0.06;
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start();
+      o.stop(audioCtx.currentTime + time);
+    }
+
+    function resizeCanvas(){
+      // Buat canvas berbasis lebar container, tetap square
+      const max = Math.min(window.innerWidth - 64, 700);
+      canvas.width = max;
+      canvas.height = max;
+      tileSize = Math.floor(canvas.width / gridCount);
+      draw();
+    }
+
+    function resetGame(){
+      gridCount = parseInt(gridSel.value);
+      tileSize = Math.floor(canvas.width / gridCount);
+      snake = [];
+      const startLen = Math.max(3, Math.floor(gridCount/5));
+      const cx = Math.floor(gridCount/2);
+      const cy = Math.floor(gridCount/2);
+      for(let i=0;i<startLen;i++) snake.push({x:cx-i,y:cy});
+      dir = {x:1,y:0};
+      nextDir = {x:1,y:0};
+      spawnFood();
+      score = 0;
+      scoreEl.textContent = score;
+      highEl.textContent = highScore;
+      updateSpeedLabel();
+      draw();
+    }
+
+    function spawnFood(){
+      while(true){
+        const fx = Math.floor(Math.random()*gridCount);
+        const fy = Math.floor(Math.random()*gridCount);
+        if(!snake.some(s=>s.x===fx && s.y===fy)){
+          food = {x:fx,y:fy};
+          return;
+        }
+      }
+    }
+
+    function draw(){
+      // Clear
+      ctx.fillStyle = '#011826';
+      ctx.fillRect(0,0,canvas.width,canvas.height);
+
+      // Draw grid (subtle)
+      ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+      ctx.lineWidth = 1;
+      for(let i=0;i<=gridCount;i++){
+        const pos = i*tileSize;
+        ctx.beginPath(); ctx.moveTo(pos,0); ctx.lineTo(pos,canvas.height); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0,pos); ctx.lineTo(canvas.width,pos); ctx.stroke();
+      }
+
+      // Draw food
+      drawRect(food.x, food.y, '#ff4d6d');
+
+      // Draw snake
+      for(let i=0;i<snake.length;i++){
+        const s = snake[i];
+        const shade = i===0 ? '#7ef9c9' : `rgba(126,249,201, ${1 - i/snake.length * 0.6})`;
+        drawRect(s.x,s.y,shade,true);
+      }
+    }
+
+    function drawRect(gx, gy, color, round=false){
+      const x = gx*tileSize + 2;
+      const y = gy*tileSize + 2;
+      const w = tileSize - 4;
+      const h = tileSize - 4;
+      if(round){
+        const r = Math.max(2, Math.floor(w/6));
+        ctx.fillStyle = color;
+        roundRect(ctx, x, y, w, h, r);
+        ctx.fill();
+      } else {
+        ctx.fillStyle = color;
+        ctx.fillRect(x,y,w,h);
+      }
+    }
+
+    function roundRect(ctx, x, y, width, height, radius) {
+      ctx.beginPath();
+      ctx.moveTo(x + radius, y);
+      ctx.arcTo(x + width, y, x + width, y + height, radius);
+      ctx.arcTo(x + width, y + height, x, y + height, radius);
+      ctx.arcTo(x, y + height, x, y, radius);
+      ctx.arcTo(x, y, x + width, y, radius);
+      ctx.closePath();
+    }
+
+    function step(){
+      // update direction
+      if((nextDir.x !== -dir.x || nextDir.y !== -dir.y)) dir = nextDir;
+      const head = {x: snake[0].x + dir.x, y: snake[0].y + dir.y};
+
+      // Wrap around edges
+      if(head.x < 0) head.x = gridCount-1;
+      if(head.x >= gridCount) head.x = 0;
+      if(head.y < 0) head.y = gridCount-1;
+      if(head.y >= gridCount) head.y = 0;
+
+      // Collision with self?
+      if(snake.some((s,i)=>i>0 && s.x===head.x && s.y===head.y)){
+        // game over
+        beep(120);
+        running = false;
+        clearInterval(tickInterval);
+        tickInterval = null;
+        msg.textContent = `Game Over — Skor: ${score}. Tekan Mulai untuk coba lagi.`;
+        if(score > highScore){
+          highScore = score;
+          localStorage.setItem('snake_high', highScore);
+          highEl.textContent = highScore;
+        }
+        return;
+      }
+
+      // Move snake
+      snake.unshift(head);
+      if(head.x === food.x && head.y === food.y){
+        score++;
+        beep(440, 0.08);
+        scoreEl.textContent = score;
+        spawnFood();
+      } else {
+        snake.pop();
+      }
+      draw();
+    }
+
+    function start(){
+      if(running) return;
+      // resume audio context for chrome mobile
+      if(audioCtx.state === 'suspended') audioCtx.resume();
+      running = true;
+      msg.textContent = 'Berjalan... gunakan keyboard atau tombol sentuh.';
+      const speed = Number(speedRange.value);
+      const ms = Math.max(40, 220 - speed*16); // map speed to interval
+      if(tickInterval) clearInterval(tickInterval);
+      tickInterval = setInterval(step, ms);
+    }
+
+    function pause(){
+      if(!running) return;
+      running = false;
+      clearInterval(tickInterval);
+      tickInterval = null;
+      msg.textContent = 'Dijeda.';
+    }
+
+    function updateSpeedLabel(){
+      const v = Number(speedRange.value);
+      let txt = 'Lambat';
+      if(v<=4) txt='Lambat';
+      else if(v<=7) txt='Normal';
+      else if(v<=10) txt='Cepat';
+      else txt='Ekstra Cepat';
+      speedLabel.textContent = txt;
+      // If running, restart interval with new speed
+      if(running){
+        start();
+      }
+    }
+
+    // Input handling
+    window.addEventListener('keydown', (e)=>{
+      const k = e.key;
+      if(k==='ArrowUp' || k==='w' || k==='W') nextDir = {x:0,y:-1};
+      if(k==='ArrowDown' || k==='s' || k==='S') nextDir = {x:0,y:1};
+      if(k==='ArrowLeft' || k==='a' || k==='A') nextDir = {x:-1,y:0};
+      if(k==='ArrowRight' || k==='d' || k==='D') nextDir = {x:1,y:0};
+      if(k===' '){ if(running) pause(); else start(); }
+    });
+
+    // Mobile button events
+    btnUp.addEventListener('click', ()=> nextDir={x:0,y:-1});
+    btnDown.addEventListener('click', ()=> nextDir={x:0,y:1});
+    btnLeft.addEventListener('click', ()=> nextDir={x:-1,y:0});
+    btnRight.addEventListener('click', ()=> nextDir={x:1,y:0});
+
+    // Start/pause/reset
+    btnStart.addEventListener('click', ()=> start());
+    btnPause.addEventListener('click', ()=> pause());
+    btnReset.addEventListener('click', ()=>{ pause(); resetGame(); });
+
+    // Settings change
+    gridSel.addEventListener('change', ()=>{ pause(); resetGame(); resizeCanvas(); });
+    speedRange.addEventListener('input', updateSpeedLabel);
+
+    // Swipe detection for mobile (simple)
+    let touchStart = null;
+    canvas.addEventListener('touchstart', (e)=>{ if(e.touches && e.touches[0]) touchStart = {x:e.touches[0].clientX, y:e.touches[0].clientY}; });
+    canvas.addEventListener('touchmove', (e)=>{ if(!touchStart) return; const t = e.touches[0]; const dx = t.clientX - touchStart.x; const dy = t.clientY - touchStart.y; if(Math.abs(dx) > 20 || Math.abs(dy) > 20){ if(Math.abs(dx) > Math.abs(dy)){ nextDir = dx>0?{x:1,y:0}:{x:-1,y:0}; } else { nextDir = dy>0?{x:0,y:1}:{x:0,y:-1}; } touchStart = null; } });
+    canvas.addEventListener('touchend', ()=>{ touchStart = null; });
+
+    // Responsive
+    window.addEventListener('resize', resizeCanvas);
+
+    // Init
+    resizeCanvas();
+    resetGame();
+    updateSpeedLabel();
+
+    // Helpful: draw once per animation frame for smoothness when not running
+    function anim(){ draw(); requestAnimationFrame(anim); }
+    requestAnimationFrame(anim);
+
+  </script></body>
+</html>
